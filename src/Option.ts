@@ -7,9 +7,21 @@ export class Option<T> {
     return this.t !== null;
   }
 
+  public isNone(): boolean {
+    return this.t === null;
+  }
+
   public unwrap(): T {
     if (this.t === null) {
       throw new Error("Option is None");
+    }
+
+    return this.t;
+  }
+
+  public expect<E>(error: E): T {
+    if (this.t === null) {
+      throw error;
     }
 
     return this.t;
@@ -34,6 +46,14 @@ export class Option<T> {
   public okOr<E>(error: E): Result<T, E> {
     if (this.t === null) {
       return new Result<T, E>(null, error);
+    }
+
+    return new Result<T, E>(this.t, null);
+  }
+
+  public okOrElse<E>(f: () => E): Result<T, E> {
+    if (this.t === null) {
+      return new Result<T, E>(null, f());
     }
 
     return new Result<T, E>(this.t, null);
