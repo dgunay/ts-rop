@@ -1,6 +1,7 @@
 import { Option } from "./Option";
 import { Result } from "./Result";
 
+// A semi-monadic boolean wrapper class
 export class Bool {
   constructor(private readonly b: boolean) {}
 
@@ -16,6 +17,7 @@ export class Bool {
     return this.b ? new Option(t) : new Option(null);
   }
 
+  // Runs f if b is true, otherwise returns None
   public then<T>(f: () => T): Option<T> {
     return this.b ? new Option(f()) : new Option(null);
   }

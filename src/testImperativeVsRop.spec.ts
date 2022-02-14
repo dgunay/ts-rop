@@ -1,5 +1,6 @@
 import { Bool } from "./Bool";
 import { Option } from "./Option";
+import { Ok } from "./Result";
 
 export interface Account {
   id: number;
@@ -99,13 +100,11 @@ describe("test", () => {
       getAccountFn() // maybe we have an account
         .okOr("Account not found") // short circuit everything if we don't.
         .andThen((account) => {
-          // This only runs if we found an account
           return new Bool(account.isAdmin)
             .then(() => doAdminThingsSpy(account)) // this only runs if we're an admin
             .okOr("User does not have permission to do admin things");
         })
         .andThen((account) => {
-          // this only runs if the previous block didn't error
           return new Bool(account.isSuperAdmin)
             .then(() => doSuperAdminThingsSpy(account)) // this only runs if we're a super admin
             .okOr("User does not have permission to do super admin things");
@@ -141,6 +140,111 @@ describe("test", () => {
       expect(() => doFunctionalTest(getSuperAdminAccount)).not.toThrowError();
       expect(doAdminThingsSpy).toHaveBeenCalled();
       expect(doSuperAdminThingsSpy).toHaveBeenCalled();
+    });
+  });
+});
+
+describe("ROP comparison", () => {
+  const handleMessage = jest.fn();
+  const log = {
+    debug: jest.fn(),
+    error: jest.fn(),
+  };
+  const isClientMsg = jest.fn();
+
+  describe("signaling message handler", () => {
+    // Part of the Studio signaling server message handling code (some details
+    // changed slightly)
+    const realSignalingMessageHandler = (ws: any, message: any) => {
+      log.debug("Received a message");
+      try {
+        if (!message.byteLength) {
+          throw new Error("Received empty message");
+        }
+
+        log.debug("Parsing message");
+        const clientMsg = JSON.parse(message.payload);
+        log.debug("Got:", clientMsg);
+        if (!isClientMsg(clientMsg)) {
+          throw new Error("Not a client message");
+        }
+
+        handleMessage(ws, clientMsg);
+      } catch (e) {
+        log.error(e);
+      }
+    };
+
+    // Functionally the same, but rewritten to use ROP.
+    const ropSignalingMessageHandler = (ws: any, message: any) => {
+      log.debug("Received a message");
+      new Bool(message.byteLength)
+        .okOr("Received empty message")
+        .andThen(() => Ok(log.debug("Parsing message")))
+        .andThen(() => Ok(JSON.parse(message.payload)))
+        .andThen((msg) =>
+          new Bool(isClientMsg(msg)).thenSome(msg).okOr("Not a client message")
+        )
+        .andThen((msg) => Ok(handleMessage(ws, msg)))
+        .orElse((e) => log.error(e));
+    };
+
+    it("should throw an error if byteLength is falsy", () => {
+      realSignalingMessageHandler(null, { byteLength: 0 });
+      expect(log.error).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: "Received empty message",
+        })
+      );
+
+      ropSignalingMessageHandler(null, { byteLength: 0 });
+      expect(log.error).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: "Received empty message",
+        })
+      );
+    });
+
+    it("should throw an error if not a client message", () => {
+      isClientMsg.mockReturnValueOnce(false).mockReturnValueOnce(false);
+
+      realSignalingMessageHandler(null, {
+        byteLength: 1,
+        payload: `{"foo":"bar"}`,
+      });
+      expect(log.error).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: "Not a client message",
+        })
+      );
+
+      ropSignalingMessageHandler(null, {
+        byteLength: 1,
+        payload: `{"foo":"bar"}`,
+      });
+      expect(log.error).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: "Not a client message",
+        })
+      );
+    });
+
+    it("should call handleMessage", () => {
+      isClientMsg.mockReturnValueOnce(true).mockReturnValueOnce(true);
+      handleMessage.mockClear();
+
+      realSignalingMessageHandler(null, {
+        byteLength: 1,
+        payload: `{"foo":"bar"}`,
+      });
+      expect(handleMessage).toHaveBeenCalledWith(null, { foo: "bar" });
+      handleMessage.mockClear();
+
+      ropSignalingMessageHandler(null, {
+        byteLength: 1,
+        payload: `{"foo":"bar"}`,
+      });
+      expect(handleMessage).toHaveBeenCalledWith(null, { foo: "bar" });
     });
   });
 });
